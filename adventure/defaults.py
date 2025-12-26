@@ -46,8 +46,6 @@ default_user = {
         "xp__earnings": 0,
         "gold__losses": 0,
     },
-    "autoadd_enabled": False,
-    "autoadd_action": None,
 }
 
 default_guild = {

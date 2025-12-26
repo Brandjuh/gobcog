@@ -387,6 +387,7 @@ class Character:
         self.loadouts: dict = kwargs.pop("loadouts")
         self.heroclass: dict = kwargs.pop("heroclass")
         self.skill: dict = kwargs.pop("skill")
+        self.autoadd: dict = kwargs.pop("autoadd", {"enabled": False, "action": None})
         self.bal: int = kwargs.pop("bal")
         self.user: discord.Member = kwargs.pop("user")
         self.sets = []
@@ -1480,6 +1481,7 @@ class Character:
             "loadouts": loadouts,
             "heroclass": heroclass,
             "skill": data["skill"],
+            "autoadd": data.get("autoadd", {"enabled": False, "action": None}),
             "bal": balance,
             "user": user,
             "rebirths": data.pop("rebirths", 0),
@@ -1552,6 +1554,7 @@ class Character:
             "loadouts": self.loadouts,  # convert to dict of items
             "heroclass": self.heroclass,
             "skill": self.skill,
+            "autoadd": self.autoadd,
             "rebirths": self.rebirths,
             "set_items": self.set_items,
             "last_skill_reset": self.last_skill_reset,
@@ -1620,6 +1623,7 @@ class Character:
             "adventures": self.adventures,
             "nega": self.nega,
             "weekly_score": self.weekly_score,
+            "autoadd": self.autoadd,
             "exp": 0,
             "lvl": 1,
             "att": 0,

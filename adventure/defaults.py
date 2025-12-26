@@ -30,6 +30,7 @@ default_user = {
         "cooldown": 0,
     },
     "skill": {"pool": 0, "att": 0, "cha": 0, "int": 0},
+    "autoadd": {"enabled": False, "action": None},
     "adventures": {
         "wins": 0,
         "loses": 0,

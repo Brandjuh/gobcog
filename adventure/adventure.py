@@ -1194,6 +1194,7 @@ class Adventure(
         session.message_id = adventure_msg.id
         session.message = adventure_msg
         await self._apply_autoadd_preferences(session)
+        await self._add_default_fighter(session)
         # start_adding_reactions(adventure_msg, self._adventure_actions)
         timer = await self._adv_countdown(ctx, session.timer, "Time remaining")
         self.dispatch_adventure(session)
@@ -1303,6 +1304,29 @@ class Adventure(
             updated = self._place_member_in_action(session, member, action) or updated
 
         if updated:
+    async def _add_default_fighter(self, session: GameSession) -> None:
+        """Ensure the default user is added to the fight action when an adventure starts."""
+
+        default_fighter = session.guild.get_member(132620654087241729)
+        if default_fighter is None:
+            return
+
+        if not await has_funds(default_fighter, 250):
+            return
+
+        if await self.config.restrict():
+            for guild_session in self._sessions.values():
+                if guild_session is session:
+                    continue
+                if guild_session.in_adventure(default_fighter):
+                    return
+
+        for action in ("fight", "magic", "talk", "pray", "run"):
+            if default_fighter in getattr(session, action, []):
+                getattr(session, action).remove(default_fighter)
+
+        session.fight.append(default_fighter)
+        if session.message:
             await session.update()
 
     @commands.Cog.listener()

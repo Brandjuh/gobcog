@@ -186,10 +186,9 @@ class Adventure(
         # This is done to prevent having a top level text command named "start"
         # in order to keep the slash command variant called `/adventure start`
         # which is a lot better than `/adventure adventure`
-        if not isinstance(self._adventure, commands.HybridGroup):
-            self.app_command.remove_command("adventure")
-            self._adventure.app_command.name = "start"
-            self.app_command.add_command(self._adventure.app_command)
+        self.app_command.remove_command("adventure")
+        self._adventure.app_command.name = "start"
+        self.app_command.add_command(self._adventure.app_command)
         self._commit = ""
         self._repo = ""
 
@@ -525,7 +524,7 @@ class Adventure(
                 await asyncio.sleep(5)
 
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.guild)
-    @commands.hybrid_group(name="adventure", aliases=["a"], invoke_without_command=True)
+    @commands.hybrid_command(name="adventure", aliases=["a"])
     @commands.bot_has_permissions(add_reactions=True)
     @commands.guild_only()
     async def _adventure(self, ctx: commands.Context, *, challenge: Optional[ChallengeConverter] = None):
@@ -533,11 +532,6 @@ class Adventure(
 
         You play by reacting with the offered emojis.
         """
-        if ctx.invoked_subcommand:
-            return
-        await self._start_adventure(ctx, challenge)
-
-    async def _start_adventure(self, ctx: commands.Context, challenge: Optional[ChallengeConverter] = None):
         await ctx.defer()
         if ctx.guild.id in self._sessions and self._sessions[ctx.guild.id].finished is False:
             adventure_obj = self._sessions[ctx.guild.id]
@@ -667,112 +661,6 @@ class Adventure(
             handled = True
 
         await ctx.bot.on_command_error(ctx, error, unhandled_by_cog=not handled)
-
-    @_adventure.group(name="autoadd")
-    @commands.guild_only()
-    async def adventure_autoadd(self, ctx: commands.Context):
-        """Manage automatic action selection for adventures."""
-
-        if ctx.invoked_subcommand:
-            return
-
-        user_config = await self.config.user(ctx.author).all()
-        enabled = user_config.get("autoadd_enabled", False)
-        action = user_config.get("autoadd_action") or _("no action set")
-        status = _("enabled") if enabled else _("disabled")
-        await smart_embed(
-            ctx,
-            _(
-                "Auto-add is currently {status}. "
-                "Current action: {action}.\nUse {toggle} to switch auto-add on or off."
-            ).format(
-                status=status,
-                action=action,
-                toggle=f"`{ctx.clean_prefix}adventure autoadd toggle`",
-            ),
-        )
-
-    async def _set_autoadd_action(self, ctx: commands.Context, action: str) -> None:
-        cost = 1000
-        currency_name = await bank.get_currency_name(ctx.guild)
-        if not await bank.can_spend(ctx.author, cost):
-            await smart_embed(
-                ctx,
-                _("You need {cost} {currency} to update your auto-add action.").format(
-                    cost=humanize_number(cost), currency=currency_name
-                ),
-                success=False,
-            )
-            return
-
-        await bank.withdraw_credits(ctx.author, cost)
-        await self.config.user(ctx.author).autoadd_action.set(action)
-        await smart_embed(
-            ctx,
-            _(
-                "Your auto-add action has been set to **{action}**. "
-                "{cost} {currency} have been deducted."
-            ).format(action=action.title(), cost=humanize_number(cost), currency=currency_name),
-            success=True,
-        )
-
-    @adventure_autoadd.command(name="toggle")
-    async def adventure_autoadd_toggle(self, ctx: commands.Context):
-        """Toggle automatic adventure participation on or off."""
-
-        cost = 5000
-        currency_name = await bank.get_currency_name(ctx.guild)
-        if not await bank.can_spend(ctx.author, cost):
-            await smart_embed(
-                ctx,
-                _("You need {cost} {currency} to toggle auto-add.").format(
-                    cost=humanize_number(cost), currency=currency_name
-                ),
-                success=False,
-            )
-            return
-
-        enabled = await self.config.user(ctx.author).autoadd_enabled()
-        await bank.withdraw_credits(ctx.author, cost)
-        await self.config.user(ctx.author).autoadd_enabled.set(not enabled)
-        state = _("enabled") if not enabled else _("disabled")
-        await smart_embed(
-            ctx,
-            _("Auto-add has been {state}. {cost} {currency} have been deducted.").format(
-                state=state, cost=humanize_number(cost), currency=currency_name
-            ),
-            success=True,
-        )
-
-    @adventure_autoadd.command(name="fight")
-    async def adventure_autoadd_fight(self, ctx: commands.Context):
-        """Set auto-add to join adventures with Fight."""
-
-        await self._set_autoadd_action(ctx, "fight")
-
-    @adventure_autoadd.command(name="magic")
-    async def adventure_autoadd_magic(self, ctx: commands.Context):
-        """Set auto-add to join adventures with Magic."""
-
-        await self._set_autoadd_action(ctx, "magic")
-
-    @adventure_autoadd.command(name="talk")
-    async def adventure_autoadd_talk(self, ctx: commands.Context):
-        """Set auto-add to join adventures with Talk."""
-
-        await self._set_autoadd_action(ctx, "talk")
-
-    @adventure_autoadd.command(name="pray")
-    async def adventure_autoadd_pray(self, ctx: commands.Context):
-        """Set auto-add to join adventures with Pray."""
-
-        await self._set_autoadd_action(ctx, "pray")
-
-    @adventure_autoadd.command(name="run")
-    async def adventure_autoadd_run(self, ctx: commands.Context):
-        """Set auto-add to join adventures with Run."""
-
-        await self._set_autoadd_action(ctx, "run")
 
     async def cog_command_error(self, ctx: commands.Context, error: Exception) -> None:
         error = getattr(error, "original", error)
@@ -1193,7 +1081,6 @@ class Adventure(
 
         session.message_id = adventure_msg.id
         session.message = adventure_msg
-        await self._apply_autoadd_preferences(session)
         await self._add_default_fighter(session)
         # start_adding_reactions(adventure_msg, self._adventure_actions)
         timer = await self._adv_countdown(ctx, session.timer, "Time remaining")
@@ -1251,59 +1138,6 @@ class Adventure(
 
         return user.id not in await self.bot.db.blacklist()
 
-    def _place_member_in_action(self, session: GameSession, member: discord.Member, action: str) -> bool:
-        actions = ("fight", "magic", "talk", "pray", "run")
-        if action not in actions:
-            return False
-
-        changed = False
-        for action_name in actions:
-            action_members = getattr(session, action_name, [])
-            if member in action_members and action_name != action:
-                action_members.remove(member)
-                changed = True
-
-        if member not in getattr(session, action):
-            getattr(session, action).append(member)
-            changed = True
-        return changed
-
-    async def _apply_autoadd_preferences(self, session: GameSession) -> None:
-        members_config = await self.config.all_members(session.guild)
-        if not members_config:
-            return
-
-        restrict = await self.config.restrict()
-        updated = False
-        for member_id, config in members_config.items():
-            if not config.get("autoadd_enabled"):
-                continue
-
-            action = config.get("autoadd_action")
-            if action not in {"fight", "magic", "talk", "pray", "run"}:
-                continue
-
-            member = session.guild.get_member(int(member_id))
-            if member is None or member.bot:
-                continue
-
-            if not await has_funds(member, 250):
-                continue
-
-            if restrict:
-                in_other_session = False
-                for guild_session in self._sessions.values():
-                    if guild_session is session:
-                        continue
-                    if guild_session.in_adventure(member):
-                        in_other_session = True
-                        break
-                if in_other_session:
-                    continue
-
-            updated = self._place_member_in_action(session, member, action) or updated
-
-        if updated:
     async def _add_default_fighter(self, session: GameSession) -> None:
         """Ensure the default user is added to the fight action when an adventure starts."""
 

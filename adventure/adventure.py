@@ -524,7 +524,7 @@ class Adventure(
                 await asyncio.sleep(5)
 
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.guild)
-    @commands.hybrid_group(name="adventure", aliases=["a"], invoke_without_command=True)
+    @commands.hybrid_command(name="adventure", aliases=["a"])
     @commands.bot_has_permissions(add_reactions=True)
     @commands.guild_only()
     async def _adventure(self, ctx: commands.Context, *, challenge: Optional[ChallengeConverter] = None):
@@ -638,112 +638,6 @@ class Adventure(
                     await smart_embed(ctx, msg, success=False)
         while ctx.guild.id in self._sessions:
             del self._sessions[ctx.guild.id]
-
-    @_adventure.group(name="autoadd", invoke_without_command=True)
-    @commands.guild_only()
-    async def adventure_autoadd(
-        self,
-        ctx: commands.Context,
-        action: Optional[Literal["fight", "magic", "talk", "pray", "run"]] = None,
-    ):
-        """Automatically join adventures with a preferred action."""
-
-        if ctx.invoked_subcommand is not None:
-            return
-
-        autoadd = await self.config.user(ctx.author).autoadd()
-        if action is None:
-            status = _("enabled") if autoadd.get("enabled") else _("disabled")
-            choice = autoadd.get("action") or _("not set")
-            msg = _(
-                "Your adventure autoadd is currently {status} and set to `{choice}`."
-            ).format(status=status, choice=choice)
-            return await smart_embed(ctx, msg)
-
-        cost = 1000
-        if not await bank.can_spend(ctx.author, cost):
-            await self._disable_autoadd(ctx.author)
-            currency = await bank.get_currency_name(ctx.guild)
-            msg = _(
-                "You need {cost} {currency} to update autoadd. The option has been disabled."
-            ).format(cost=humanize_number(cost), currency=currency)
-            return await smart_embed(ctx, msg, success=False)
-
-        await bank.withdraw_credits(ctx.author, cost)
-        autoadd.update({"action": action})
-        await self.config.user(ctx.author).autoadd.set(autoadd)
-
-        status = _("enabled") if autoadd.get("enabled") else _("disabled")
-        msg = _(
-            "Autoadd action set to `{action}` for {cost} credits. Autoadd is currently {status}."
-        ).format(action=action, cost=humanize_number(cost), status=status)
-        await smart_embed(ctx, msg, success=True)
-
-    @adventure_autoadd.command(name="toggle")
-    async def adventure_autoadd_toggle(self, ctx: commands.Context):
-        """Toggle adventure autoadd on or off."""
-
-        cost = 5000
-        autoadd = await self.config.user(ctx.author).autoadd()
-        if not await bank.can_spend(ctx.author, cost):
-            if autoadd.get("enabled"):
-                await self._disable_autoadd(ctx.author)
-            currency = await bank.get_currency_name(ctx.guild)
-            msg = _(
-                "You need {cost} {currency} to toggle autoadd. The option has been disabled."
-            ).format(cost=humanize_number(cost), currency=currency)
-            return await smart_embed(ctx, msg, success=False)
-
-        await bank.withdraw_credits(ctx.author, cost)
-        autoadd["enabled"] = not autoadd.get("enabled", False)
-        if autoadd["enabled"] and autoadd.get("action") not in self._adventure_controls:
-            autoadd["action"] = None
-        await self.config.user(ctx.author).autoadd.set(autoadd)
-
-        status = _("enabled") if autoadd["enabled"] else _("disabled")
-        msg = _("Autoadd has been {status}. This toggle cost {cost} credits.").format(
-            status=status, cost=humanize_number(cost)
-        )
-        await smart_embed(ctx, msg, success=True)
-
-    async def _disable_autoadd(self, user: discord.Member):
-        autoadd = await self.config.user(user).autoadd()
-        autoadd["enabled"] = False
-        await self.config.user(user).autoadd.set(autoadd)
-
-    async def _apply_autoadd_preferences(self, ctx: commands.Context, session: GameSession):
-        autoadded = []
-        for member in ctx.guild.members:
-            if member.bot:
-                continue
-            autoadd = await self.config.user(member).autoadd()
-            action = autoadd.get("action")
-            if not autoadd.get("enabled") or action not in self._adventure_controls:
-                continue
-            if self.in_adventure(user=member):
-                continue
-            if not await has_funds(member, 250):
-                await self._disable_autoadd(member)
-                continue
-            for name in self._adventure_controls:
-                if member in getattr(session, name, []):
-                    getattr(session, name).remove(member)
-            getattr(session, action).append(member)
-            autoadded.append((member, action))
-
-        if autoadded:
-            session.participants.update({member for member, _ in autoadded})
-            await session.update()
-            summaries = {}
-            for member, action in autoadded:
-                summaries.setdefault(action, []).append(bold(member.display_name))
-            lines = [
-                _("Auto-added to {action}: {heroes}").format(
-                    action=action.title(), heroes=humanize_list(names)
-                )
-                for action, names in summaries.items()
-            ]
-            await smart_embed(ctx, "\n".join(lines), success=True)
 
     @_adventure.error
     async def _error_handler(self, ctx: commands.Context, error: Exception) -> None:
@@ -1187,7 +1081,6 @@ class Adventure(
 
         session.message_id = adventure_msg.id
         session.message = adventure_msg
-        await self._apply_autoadd_preferences(ctx, session)
         # start_adding_reactions(adventure_msg, self._adventure_actions)
         timer = await self._adv_countdown(ctx, session.timer, "Time remaining")
         self.dispatch_adventure(session)

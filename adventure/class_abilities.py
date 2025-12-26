@@ -499,12 +499,12 @@ class ClassAbilities(AdventureMixin):
                 success=False,
             )
 
-        use_separate_economy = await self.config.separate_economy()
-        currency_name = await bank.get_currency_name(ctx.guild, _forced=not use_separate_economy)
         start_msg = _(
-            "Starting automatic search for `{pet}`. Each attempt costs 1,000 {currency} and runs every minute until it succeeds."
-        ).format(pet=desired_name, currency=currency_name)
+            "Starting automatic search for `{pet}`. Each attempt costs 1,000 credits and runs every minute until it succeeds."
+        ).format(pet=desired_name)
         await smart_embed(ctx, start_msg, success=True)
+
+        use_separate_economy = getattr(self, "_separate_economy", False)
 
         while True:
             async with self.get_lock(ctx.author):
@@ -537,7 +537,6 @@ class ClassAbilities(AdventureMixin):
                         success=False,
                     )
 
-                use_separate_economy = await self.config.separate_economy()
                 cost = 1000
                 if not await bank.can_spend(ctx.author, cost, _forced=not use_separate_economy):
                     currency = await bank.get_currency_name(ctx.guild, _forced=not use_separate_economy)

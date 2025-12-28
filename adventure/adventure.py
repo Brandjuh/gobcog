@@ -579,8 +579,6 @@ class Adventure(
             member = guild.get_member(AUTOPLAY_USER_ID)
             if member is None or member.bot:
                 continue
-            if guild.id in self._autoplay_inflight:
-                continue
             if guild.id in self._sessions and not self._sessions[guild.id].finished:
                 continue
             guild_settings = await self.config.guild(guild).all()
@@ -598,16 +596,11 @@ class Adventure(
     ):
         if guild.id in self._sessions and not self._sessions[guild.id].finished:
             return
-        if guild.id in self._autoplay_inflight:
-            return
-        self._autoplay_inflight.add(guild.id)
         ctx = AutoPlayContext(self.bot, guild, channel, member, prefix)
         try:
             await Adventure._adventure.callback(self, ctx)
         except Exception:
             log.exception("Unable to start autoplay adventure in %s", guild.name)
-        finally:
-            self._autoplay_inflight.discard(guild.id)
 
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.guild)
     @commands.hybrid_group(name="adventure", aliases=["a"], invoke_without_command=True)

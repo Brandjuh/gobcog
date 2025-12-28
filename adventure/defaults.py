@@ -61,7 +61,6 @@ default_guild = {
     "rebirth_cost": 100.0,
     "disallow_withdraw": True,
     "max_allowed_withdraw": 50000,
-    "autoplay": {"enabled": False, "channel": None, "prefix": None},
 }
 default_global = {
     "god_name": "Herbert",

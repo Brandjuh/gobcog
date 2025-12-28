@@ -659,7 +659,6 @@ class Adventure(
         adventure_msg = _("You feel adventurous, {}?").format(bold(ctx.author.display_name))
         try:
             reward, participants = await self._simple(ctx, adventure_msg, challenge)
-            await self.config.guild(ctx.guild).cooldown.set(time.time())
             if ctx.guild.id in self._sessions:
                 self._sessions[ctx.guild.id].finished = True
         except Exception as exc:
@@ -676,6 +675,7 @@ class Adventure(
                 del self._sessions[ctx.guild.id]
             return
         reward_copy = reward.copy()
+        await self.config.guild(ctx.guild).cooldown.set(time.time())
         send_message = ""
         for userid, rewards in reward_copy.items():
             if rewards:

@@ -664,13 +664,15 @@ class Adventure(
         except Exception as exc:
             if ctx.guild.id in self._sessions:
                 self._sessions[ctx.guild.id].finished = True
-            await self.config.guild(ctx.guild).cooldown.set(0)
+            cooldown_value = time.time() if getattr(ctx, "autoplay", False) else 0
+            await self.config.guild(ctx.guild).cooldown.set(cooldown_value)
             log.exception("Something went wrong controlling the game", exc_info=exc)
             while ctx.guild.id in self._sessions:
                 del self._sessions[ctx.guild.id]
             return
         if not reward and not participants:
-            await self.config.guild(ctx.guild).cooldown.set(0)
+            cooldown_value = time.time() if getattr(ctx, "autoplay", False) else 0
+            await self.config.guild(ctx.guild).cooldown.set(cooldown_value)
             while ctx.guild.id in self._sessions:
                 del self._sessions[ctx.guild.id]
             return

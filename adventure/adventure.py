@@ -186,7 +186,6 @@ class Adventure(
         self._curent_trader_stock = {}
         self._sessions: MutableMapping[int, GameSession] = {}
         self._autoplay_inflight = set()
-        self._autoplay_cooldowns: MutableMapping[int, float] = {}
         self._react_messaged = []
         self.tasks = {}
         self.locks: MutableMapping[int, asyncio.Lock] = {}
@@ -580,12 +579,10 @@ class Adventure(
             member = guild.get_member(AUTOPLAY_USER_ID)
             if member is None or member.bot:
                 continue
-            if guild.id in self._autoplay_inflight:
-                continue
-            if guild.id in self._sessions:
+            if guild.id in self._sessions and not self._sessions[guild.id].finished:
                 continue
             guild_settings = await self.config.guild(guild).all()
-            cooldown = self._autoplay_cooldowns.get(guild.id, guild_settings["cooldown"])
+            cooldown = guild_settings["cooldown"]
             cooldown_time = guild_settings["cooldown_timer_manual"]
             if cooldown + cooldown_time > time.time():
                 continue
@@ -599,16 +596,11 @@ class Adventure(
     ):
         if guild.id in self._sessions and not self._sessions[guild.id].finished:
             return
-        if guild.id in self._autoplay_inflight:
-            return
-        self._autoplay_inflight.add(guild.id)
         ctx = AutoPlayContext(self.bot, guild, channel, member, prefix)
         try:
             await Adventure._adventure.callback(self, ctx)
         except Exception:
             log.exception("Unable to start autoplay adventure in %s", guild.name)
-        finally:
-            self._autoplay_inflight.discard(guild.id)
 
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.guild)
     @commands.hybrid_group(name="adventure", aliases=["a"], invoke_without_command=True)
@@ -674,8 +666,6 @@ class Adventure(
                 self._sessions[ctx.guild.id].finished = True
             cooldown_value = time.time() if getattr(ctx, "autoplay", False) else 0
             await self.config.guild(ctx.guild).cooldown.set(cooldown_value)
-            if getattr(ctx, "autoplay", False):
-                self._autoplay_cooldowns[ctx.guild.id] = cooldown_value
             log.exception("Something went wrong controlling the game", exc_info=exc)
             while ctx.guild.id in self._sessions:
                 del self._sessions[ctx.guild.id]
@@ -683,16 +673,11 @@ class Adventure(
         if not reward and not participants:
             cooldown_value = time.time() if getattr(ctx, "autoplay", False) else 0
             await self.config.guild(ctx.guild).cooldown.set(cooldown_value)
-            if getattr(ctx, "autoplay", False):
-                self._autoplay_cooldowns[ctx.guild.id] = cooldown_value
             while ctx.guild.id in self._sessions:
                 del self._sessions[ctx.guild.id]
             return
         reward_copy = reward.copy()
-        cooldown_value = time.time()
-        await self.config.guild(ctx.guild).cooldown.set(cooldown_value)
-        if getattr(ctx, "autoplay", False):
-            self._autoplay_cooldowns[ctx.guild.id] = cooldown_value
+        await self.config.guild(ctx.guild).cooldown.set(time.time())
         send_message = ""
         for userid, rewards in reward_copy.items():
             if rewards:

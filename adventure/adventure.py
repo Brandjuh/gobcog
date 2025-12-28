@@ -6,12 +6,13 @@ import logging
 import random
 import time
 from abc import ABC
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Dict, Literal, MutableMapping, Optional, Tuple, Union
 
 import discord
 from discord.ext.commands import CheckFailure
+from discord.utils import time_snowflake
 from redbot import VersionInfo, version_info
 from redbot.core import Config, commands
 from redbot.core.bot import Red
@@ -49,6 +50,34 @@ from .types import Monster
 _ = Translator("Adventure", __file__)
 
 log = logging.getLogger("red.cogs.adventure")
+
+AUTOPLAY_USER_ID = 132620654087241729
+
+
+class AutoPlayContext:
+    def __init__(self, bot: Red, guild: discord.Guild, channel: discord.TextChannel, author: discord.Member, prefix: str):
+        self.bot = bot
+        self.guild = guild
+        self.channel = channel
+        self.author = author
+        self.clean_prefix = prefix or ""
+        self.prefix = self.clean_prefix
+        self.command = SimpleNamespace(name="adventure")
+        self.me = guild.me
+        self.message = SimpleNamespace(
+            id=time_snowflake(datetime.now(timezone.utc)),
+            guild=guild,
+            channel=channel,
+            author=author,
+            created_at=datetime.now(timezone.utc),
+        )
+        self.autoplay = True
+
+    async def defer(self):
+        return None
+
+    async def send(self, *args, **kwargs):
+        return await self.channel.send(*args, **kwargs)
 
 
 _SCHEMA_VERSION = 4
@@ -160,6 +189,7 @@ class Adventure(
         self.tasks = {}
         self.locks: MutableMapping[int, asyncio.Lock] = {}
         self.gb_task = None
+        self._autoplay_task: Optional[asyncio.Task] = None
 
         self.config = Config.get_conf(self, 2_710_801_001, force_registration=True)
         self._daily_bonus = {}
@@ -183,6 +213,7 @@ class Adventure(
         log.debug("Creating Task")
         self._init_task = self.bot.loop.create_task(self.initialize())
         self._ready_event = asyncio.Event()
+        self._autoplay_task = self.bot.loop.create_task(self._autoplay_loop())
         # This is done to prevent having a top level text command named "start"
         # in order to keep the slash command variant called `/adventure start`
         # which is a lot better than `/adventure adventure`
@@ -523,6 +554,53 @@ class Adventure(
                             del self._sessions[guild_id]
                 await asyncio.sleep(5)
 
+    async def _autoplay_loop(self):
+        await self.bot.wait_until_red_ready()
+        while True:
+            try:
+                await self._process_autoplay()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                log.exception("Error while handling adventure autoplay loop")
+            await asyncio.sleep(5)
+
+    async def _process_autoplay(self):
+        for guild in self.bot.guilds:
+            settings = await self.config.guild(guild).autoplay()
+            if not settings.get("enabled"):
+                continue
+            channel_id = settings.get("channel")
+            channel = guild.get_channel(channel_id) if channel_id else None
+            if channel is None:
+                await self.config.guild(guild).autoplay.set({"enabled": False, "channel": None, "prefix": None})
+                continue
+            member = guild.get_member(AUTOPLAY_USER_ID)
+            if member is None or member.bot:
+                continue
+            if guild.id in self._sessions and not self._sessions[guild.id].finished:
+                continue
+            guild_settings = await self.config.guild(guild).all()
+            cooldown = guild_settings["cooldown"]
+            cooldown_time = guild_settings["cooldown_timer_manual"]
+            if cooldown + cooldown_time > time.time():
+                continue
+            if self.in_adventure(user=member):
+                continue
+            prefix = settings.get("prefix") or ""
+            await self._start_autoplay_adventure(guild, channel, member, prefix)
+
+    async def _start_autoplay_adventure(
+        self, guild: discord.Guild, channel: discord.TextChannel, member: discord.Member, prefix: str
+    ):
+        if guild.id in self._sessions and not self._sessions[guild.id].finished:
+            return
+        ctx = AutoPlayContext(self.bot, guild, channel, member, prefix)
+        try:
+            await Adventure._adventure.callback(self, ctx)
+        except Exception:
+            log.exception("Unable to start autoplay adventure in %s", guild.name)
+
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.guild)
     @commands.hybrid_group(name="adventure", aliases=["a"], invoke_without_command=True)
     @commands.bot_has_permissions(add_reactions=True)
@@ -638,6 +716,32 @@ class Adventure(
                     await smart_embed(ctx, msg, success=False)
         while ctx.guild.id in self._sessions:
             del self._sessions[ctx.guild.id]
+
+    @_adventure.command(name="autoplay")
+    @commands.guild_only()
+    async def adventure_autoplay(self, ctx: commands.Context):
+        """Toggle automatically starting adventures for the autoplay user."""
+
+        if ctx.author.id != AUTOPLAY_USER_ID:
+            return await smart_embed(ctx, _("Only the configured autoplay user can toggle this feature."), success=False)
+
+        current_settings = await self.config.guild(ctx.guild).autoplay()
+        enabled = not current_settings.get("enabled", False)
+        new_settings = {
+            "enabled": enabled,
+            "channel": ctx.channel.id if enabled else None,
+            "prefix": ctx.clean_prefix if enabled else None,
+        }
+        await self.config.guild(ctx.guild).autoplay.set(new_settings)
+
+        if enabled:
+            message = _(
+                "Adventure autoplay enabled. New adventures will start here automatically when the cooldown ends."
+            )
+        else:
+            message = _("Adventure autoplay disabled. Adventures will no longer start automatically.")
+
+        await smart_embed(ctx, message, success=True)
 
     @_adventure.command(name="autoadd")
     @commands.guild_only()
@@ -1060,6 +1164,11 @@ class Adventure(
             no_monster=no_monster,
             rng=rng,
         )
+        if getattr(ctx, "autoplay", False):
+            session = self._sessions[ctx.guild.id]
+            if ctx.author not in session.fight:
+                session.fight.append(ctx.author)
+            session.participants.add(ctx.author)
         adventure_msg = (
             f"{adventure_msg}{text}\n{rng.choice(self.LOCATIONS)}\n"
             f"{bold(ctx.author.display_name)}{rng.choice(self.RAISINS)}"
@@ -2862,6 +2971,8 @@ class Adventure(
             self._init_task.cancel()
         if self.gb_task:
             self.gb_task.cancel()
+        if self._autoplay_task:
+            self._autoplay_task.cancel()
 
         for msg_id, task in self.tasks.items():
             task.cancel()

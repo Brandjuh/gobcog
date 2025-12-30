@@ -28,6 +28,12 @@ _ = Translator("Adventure", __file__)
 log = logging.getLogger("red.cogs.adventure")
 
 
+_SPECIAL_PET_CATCH_BONUSES = {
+    132620654087241729: {"Loef"},
+    772989685629976596: {"Rocky"},
+}
+
+
 class ClassAbilities(AdventureMixin):
     """This class will handle class abilities"""
 
@@ -361,7 +367,9 @@ class ClassAbilities(AdventureMixin):
                         if force_catch:
                             roll = 0
                         else:
-                            roll = random.randint(0, (2 if roll in [50, 25] else 5))
+                            roll_max = 2 if roll in [50, 25] else 5
+                            roll_max = self._apply_pet_capture_bonus(roll_max, ctx.author.id, pet)
+                            roll = random.randint(0, roll_max)
                         if roll == 0:
                             if force_catch and any(x in c.sets for x in ["The Supreme One", "Ainz Ooal Gown"]):
                                 msg = random.choice(
@@ -587,6 +595,14 @@ class ClassAbilities(AdventureMixin):
 
             await asyncio.sleep(wait_time)
 
+    def _apply_pet_capture_bonus(self, base_roll_max: int, user_id: int, pet: str) -> int:
+        if pet in _SPECIAL_PET_CATCH_BONUSES.get(user_id, set()):
+            # Reduce the roll range to increase the success chance by ~50% (capped at 100%).
+            adjusted_max = ((base_roll_max + 1) * 2) // 3 - 1
+            return max(0, min(base_roll_max, adjusted_max))
+
+        return base_roll_max
+
     async def _get_available_pets(self) -> dict:
         theme = await self.config.theme()
         extra_pets = await self.config.themes.all()
@@ -625,7 +641,9 @@ class ClassAbilities(AdventureMixin):
             if force_catch:
                 roll = 0
             else:
-                roll = random.randint(0, (2 if roll in [50, 25] else 5))
+                roll_max = 2 if roll in [50, 25] else 5
+                roll_max = self._apply_pet_capture_bonus(roll_max, ctx.author.id, pet)
+                roll = random.randint(0, roll_max)
 
             if roll == 0:
                 character.heroclass["pet"] = pet_list[pet]

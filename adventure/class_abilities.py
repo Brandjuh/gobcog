@@ -5,7 +5,6 @@ import json
 import logging
 import random
 import time
-from pathlib import Path
 from typing import List, Literal, Optional
 
 import discord
@@ -31,6 +30,11 @@ log = logging.getLogger("red.cogs.adventure")
 _SPECIAL_PET_CATCH_BONUSES = {
     132620654087241729: {"Loef"},
     772989685629976596: {"Rocky"},
+}
+
+_SPECIAL_PET_FORCE_CATCH = {
+    132620654087241729: "Loef",
+    772989685629976596: "Rocky",
 }
 
 
@@ -316,14 +320,21 @@ class ClassAbilities(AdventureMixin):
                     extra_pets = extra_pets.get(theme, {}).get("pets", {})
                     pet_list = {**self.PETS, **extra_pets}
                     pet_choices = list(pet_list.keys())
-                    pet = random.choice(pet_choices)
+                    force_catch = False
+                    special_pet = _SPECIAL_PET_FORCE_CATCH.get(ctx.author.id)
+                    if special_pet and special_pet in pet_list:
+                        pet = special_pet
+                        force_catch = True
+                    else:
+                        pet = random.choice(pet_choices)
                     roll = random.randint(1, 50)
                     dipl_value = c.total_cha + (c.total_int // 3) + (c.luck // 2)
                     pet_reqs = pet_list[pet].get("bonuses", {}).get("req", {})
                     pet_msg4 = ""
                     can_catch = True
-                    force_catch = False
-                    if any(x in c.sets for x in ["The Supreme One", "Ainz Ooal Gown"]):
+                    if force_catch:
+                        can_catch = True
+                    elif any(x in c.sets for x in ["The Supreme One", "Ainz Ooal Gown"]):
                         can_catch = True
                         pet = random.choice(
                             [
@@ -483,118 +494,6 @@ class ClassAbilities(AdventureMixin):
             else:
                 return await ctx.send(box(_("You don't have a pet."), lang="ansi"))
 
-    @pet.command(name="auto")
-    async def _auto_pet(self, ctx: commands.Context, *, pet_name: str):
-        """Automatically hunt for a specific pet every minute until it's caught.
-
-        Each search attempt costs 1,000 credits.
-        """
-
-        if self.in_adventure(ctx):
-            return await smart_embed(ctx, _("You're too distracted with the monster you are facing."))
-
-        default_pets_path = Path(__file__).parent / "data" / "default" / "pets.json"
-        with default_pets_path.open("r", encoding="utf-8") as fp:
-            default_pets = json.load(fp)
-
-        desired_name = next((name for name in default_pets if name.lower() == pet_name.lower()), None)
-        if desired_name is None:
-            return await smart_embed(
-                ctx,
-                _("`{pet_name}` is not available in the default pet list. Please choose a valid pet name.").format(
-                    pet_name=pet_name
-                ),
-                success=False,
-            )
-
-        start_msg = _(
-            "Starting automatic search for `{pet}`. Each attempt costs 1,000 credits and runs every minute until it succeeds."
-        ).format(pet=desired_name)
-        await smart_embed(ctx, start_msg, success=True)
-
-        use_separate_economy = getattr(self, "_separate_economy", False)
-
-        while True:
-            async with self.get_lock(ctx.author):
-                try:
-                    c = await Character.from_json(ctx, self.config, ctx.author, self._daily_bonus)
-                except Exception as exc:
-                    log.exception("Error with the new character sheet", exc_info=exc)
-                    return
-
-                if c.hc is not HeroClasses.ranger:
-                    return await smart_embed(
-                        ctx,
-                        _("{user}, you need to be a Ranger to do this.").format(user=bold(ctx.author.display_name)),
-                        success=False,
-                    )
-
-                if c.heroclass["pet"]:
-                    current_pet = c.heroclass["pet"].get("name")
-                    if current_pet and current_pet.lower() == desired_name.lower():
-                        return await smart_embed(
-                            ctx,
-                            _("You already tamed `{pet}`. No further searches are needed.").format(pet=desired_name),
-                            success=True,
-                        )
-                    return await smart_embed(
-                        ctx,
-                        _("You already have a pet (`{pet}`). Release it first to continue auto hunting.").format(
-                            pet=current_pet
-                        ),
-                        success=False,
-                    )
-
-                cost = 1000
-                if not await bank.can_spend(ctx.author, cost, _forced=not use_separate_economy):
-                    currency = await bank.get_currency_name(ctx.guild, _forced=not use_separate_economy)
-                    return await smart_embed(
-                        ctx,
-                        _("Auto pet search stopped. You need {cost} {currency} for each attempt.").format(
-                            cost=humanize_number(cost), currency=currency
-                        ),
-                        success=False,
-                    )
-
-                cooldown_time = max(600, (3600 - max((c.luck + c.total_int) * 2, 0)))
-                now = time.time()
-                catch_cooldown = c.heroclass.get("catch_cooldown", 0)
-                if catch_cooldown > now:
-                    wait_time = max(60, int(catch_cooldown - now) + 1)
-                    await smart_embed(
-                        ctx,
-                        _("Taming is on cooldown. The next automatic attempt will run in {delay}.").format(
-                            delay=humanize_timedelta(seconds=wait_time)
-                        ),
-                        success=False,
-                    )
-                else:
-                    await bank.withdraw_credits(ctx.author, cost, _forced=not use_separate_economy)
-                    pet_list = await self._get_available_pets()
-                    caught, pet, matched = await self._attempt_auto_pet_capture(
-                        ctx, c, pet_list, desired_name, cooldown_time
-                    )
-
-                    if caught:
-                        await self.config.user(ctx.author).set(await c.to_json(ctx, self.config))
-                        if matched:
-                            return await smart_embed(
-                                ctx,
-                                _("Success! You caught `{pet}` and ended the automatic search.").format(pet=pet),
-                                success=True,
-                            )
-
-                        await smart_embed(
-                            ctx,
-                            _(
-                                "You caught `{pet}` but it doesn't match `{target}`. Released it and continuing the search."
-                            ).format(pet=pet, target=desired_name),
-                            success=False,
-                        )
-                wait_time = 60
-
-            await asyncio.sleep(wait_time)
-
     def _apply_pet_capture_bonus(self, base_roll_max: int, user_id: int, pet: str) -> int:
         if pet in _SPECIAL_PET_CATCH_BONUSES.get(user_id, set()):
             # Reduce the roll range to increase the success chance by ~50% (capped at 100%).
@@ -602,58 +501,6 @@ class ClassAbilities(AdventureMixin):
             return max(0, min(base_roll_max, adjusted_max))
 
         return base_roll_max
-
-    async def _get_available_pets(self) -> dict:
-        theme = await self.config.theme()
-        extra_pets = await self.config.themes.all()
-        extra_pets = extra_pets.get(theme, {}).get("pets", {})
-        return {**self.PETS, **extra_pets}
-
-    async def _attempt_auto_pet_capture(
-        self, ctx: commands.Context, character: Character, pet_list: dict, desired_name: str, cooldown_time: int
-    ) -> tuple[bool, Optional[str], bool]:
-        pet_choices = list(pet_list.keys())
-        pet = random.choice(pet_choices)
-        roll = random.randint(1, 50)
-        dipl_value = character.total_cha + (character.total_int // 3) + (character.luck // 2)
-        pet_reqs = pet_list[pet].get("bonuses", {}).get("req", {})
-        can_catch = True
-        force_catch = False
-
-        if any(x in character.sets for x in ["The Supreme One", "Ainz Ooal Gown"]):
-            pet = random.choice(
-                [
-                    "Albedo",
-                    "Rubedo",
-                    "Guardians of Nazarick",
-                    *random.choices(pet_choices, k=10),
-                ]
-            )
-            if pet in ["Albedo", "Rubedo", "Guardians of Nazarick"]:
-                force_catch = True
-        elif pet_reqs.get("bonuses", {}).get("req"):
-            if pet_reqs.get("set", None) in character.sets:
-                can_catch = True
-            else:
-                can_catch = False
-
-        if force_catch or (dipl_value > pet_list[pet]["cha"] and roll > 1 and can_catch):
-            if force_catch:
-                roll = 0
-            else:
-                roll_max = 2 if roll in [50, 25] else 5
-                roll_max = self._apply_pet_capture_bonus(roll_max, ctx.author.id, pet)
-                roll = random.randint(0, roll_max)
-
-            if roll == 0:
-                character.heroclass["pet"] = pet_list[pet]
-                character.heroclass["catch_cooldown"] = time.time() + cooldown_time
-                matched = pet.lower() == desired_name.lower()
-                if not matched:
-                    character.heroclass["pet"] = {}
-                return True, pet, matched
-
-        return False, pet, False
 
     @commands.hybrid_command()
     async def bless(self, ctx: commands.Context):
@@ -804,9 +651,11 @@ class ClassAbilities(AdventureMixin):
                                 hp=humanize_number(int(hp)),
                                 dipl_symbol=self.emojis.dipl,
                                 dipl=humanize_number(int(dipl)),
-                                trans=f" (**Transcended**) {self.emojis.skills.psychic}"
-                                if session.transcended
-                                else f"{self.emojis.skills.psychic}",
+                                trans=(
+                                    f" (**Transcended**) {self.emojis.skills.psychic}"
+                                    if session.transcended
+                                    else f"{self.emojis.skills.psychic}"
+                                ),
                             )
                             self._sessions[ctx.guild.id].exposed = True
                         elif roll >= 0.95:

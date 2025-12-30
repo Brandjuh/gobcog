@@ -2124,6 +2124,7 @@ class Adventure(
             roll = max(session.rng.randint((1 + mod), max_roll), 1)
             if c.heroclass.get("pet", {}).get("bonuses", {}).get("crit", False):
                 pet_crit = c.heroclass.get("pet", {}).get("bonuses", {}).get("crit", 0)
+                pet_crit = max(0, min(pet_crit, 100))
                 pet_crit = session.rng.randint(pet_crit, 100)
                 if pet_crit == 100:
                     roll = max_roll
@@ -2198,6 +2199,7 @@ class Adventure(
             roll = max(session.rng.randint((1 + mod), max_roll), 1)
             if c.heroclass.get("pet", {}).get("bonuses", {}).get("crit", False):
                 pet_crit = c.heroclass.get("pet", {}).get("bonuses", {}).get("crit", 0)
+                pet_crit = max(0, min(pet_crit, 100))
                 pet_crit = session.rng.randint(pet_crit, 100)
                 if pet_crit == 100:
                     roll = max_roll

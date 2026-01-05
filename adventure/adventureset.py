@@ -462,13 +462,20 @@ class AdventureSetCommands(AdventureMixin):
             channel_list = []
         if channel is None:
             msg = _("Active Cart Channels:\n")
-            if not channel_list:
+            valid_channels = []
+            missing_channels = []
+            for chan_id in channel_list:
+                channel_obj = ctx.guild.get_channel(chan_id)
+                if channel_obj is None:
+                    missing_channels.append(chan_id)
+                    continue
+                valid_channels.append(channel_obj)
+            if missing_channels:
+                await self.config.guild(ctx.guild).cart_channels.set([c.id for c in valid_channels])
+            if not valid_channels:
                 msg += _("None.")
             else:
-                name_list = []
-                for chan_id in channel_list:
-                    name_list.append(self.bot.get_channel(chan_id))
-                msg += "\n".join(chan.name for chan in name_list)
+                msg += "\n".join(chan.name for chan in valid_channels)
             return await ctx.send(box(msg))
         elif channel.id in channel_list:
             channel_list.remove(channel.id)
@@ -495,15 +502,26 @@ class AdventureSetCommands(AdventureMixin):
         cart_trader_name = global_data["cart_name"] if not guild_data["cart_name"] else guild_data["cart_name"]
 
         cart_channel_ids = guild_data["cart_channels"]
-        if cart_channel_ids:
-            cart_channels = humanize_list([f"{self.bot.get_channel(x).name}" for x in cart_channel_ids])
-        else:
-            cart_channels = _("None")
+        cart_channel_objs = []
+        missing_cart_channels = []
+        for channel_id in cart_channel_ids:
+            channel_obj = ctx.guild.get_channel(channel_id)
+            if channel_obj is None:
+                missing_cart_channels.append(channel_id)
+                continue
+            cart_channel_objs.append(channel_obj)
+        if missing_cart_channels:
+            await self.config.guild(ctx.guild).cart_channels.set([c.id for c in cart_channel_objs])
+        cart_channels = humanize_list([f"{c.name}" for c in cart_channel_objs]) if cart_channel_objs else _("None")
 
         cart_channel_lock_override_id = guild_data["cartroom"]
         if cart_channel_lock_override_id:
-            cclo_channel_obj = self.bot.get_channel(cart_channel_lock_override_id)
-            cart_channel_lock_override = f"{cclo_channel_obj.name}"
+            cclo_channel_obj = ctx.guild.get_channel(cart_channel_lock_override_id)
+            if cclo_channel_obj is None:
+                cart_channel_lock_override = _("Channel not found.")
+                await self.config.guild(ctx.guild).cartroom.clear()
+            else:
+                cart_channel_lock_override = f"{cclo_channel_obj.name}"
         else:
             cart_channel_lock_override = _("No channel lock present.")
 

@@ -471,12 +471,12 @@ class AdventureSetCommands(AdventureMixin):
                 msg += "\n".join(chan.name for chan in name_list)
             return await ctx.send(box(msg))
         elif channel.id in channel_list:
-            new_channels = channel_list.remove(channel.id)
+            channel_list.remove(channel.id)
             await smart_embed(
                 ctx,
                 _("The {} channel has been removed from the cart delivery list.").format(channel),
             )
-            return await self.config.guild(ctx.guild).cart_channels.set(new_channels)
+            return await self.config.guild(ctx.guild).cart_channels.set(channel_list)
         else:
             channel_list.append(channel.id)
             await smart_embed(ctx, _("The {} channel has been added to the cart delivery list.").format(channel))
